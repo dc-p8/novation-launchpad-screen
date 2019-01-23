@@ -5,8 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "watch": "concurrently -r -p \"[{name}]\" -n \"TypeScript,Node\" -c \"cyan.bold,green.bold\" \"npm run watch:ts\" \"npm run watch:node\"",
-    "watch:node": "nodemon --delay 0.5 dist/app.js",
+    "watch": "concurrently -r -k -p \"[{name}]\" -n \"TypeScript,Node\" -c \"cyan.bold,green.bold\" \"npm run watch:ts\" \"npm run watch:node\"",
+    "watch:node": "nodemon dist/app.js",
     "watch:ts": "tsc -w"
   },
   "author": "",

@@ -1,0 +1,9 @@
+<div
+	class="client-wrapper">
+	<app-client
+		*ngFor="let client of clients"
+		[client]="client"
+		(delete)="DeleteClient(client)">
+	</app-client>
+</div>
+<button mat-raised-button (click)="AddClient()">Add client</button>

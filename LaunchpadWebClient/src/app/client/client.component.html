@@ -1,0 +1,56 @@
+
+<mat-card
+	class="client">
+	<form
+		(ngSubmit)="Connect()">
+		<button
+			type="button"
+			(click)="Delete()"
+			mat-icon-button
+			color="warn"
+			class="exit">
+			<mat-icon>clear</mat-icon>
+		</button>
+		<mat-form-field>
+			<input
+				name="serverUrl"
+				matInput
+				type="text"
+				[(ngModel)]="client.serverUrl"
+				placeholder="Server URL"/>
+		</mat-form-field>
+		<mat-form-field>
+			<mat-select
+				name="input"
+				[(ngModel)]="client.input"
+				placeholder="Select MIDI input">
+				<mat-option
+					*ngFor="let input of availableInputs"
+					[value]="input">
+					{{input.name}}
+				</mat-option>
+			</mat-select>
+		</mat-form-field>
+		<mat-form-field>
+			<mat-select
+				name="output"
+				[(ngModel)]="client.output"
+				placeholder="Select MIDI output">
+				<mat-option
+					*ngFor="let output of availableOutputs"
+					[value]="output">
+					{{output.name}}
+				</mat-option>
+			</mat-select>
+		</mat-form-field>
+		<button
+			type="submit"
+			class="full"
+			[disabled]="!(client && client.serverUrl && client.input && client.output)"
+			mat-raised-button
+			color="primary">
+			Connecter
+			<mat-icon>done</mat-icon>
+		</button>
+	</form>
+</mat-card>

@@ -1,30 +1,40 @@
+import http from 'http';
+import SocketIO from 'socket.io';
 import * as net from "net"
 import * as readline from "readline"
 import * as fs from "fs"
-import * as Jimp from "jimp";
+import Jimp from "jimp";
 
 class Position{
     x:number = 0;
     y:number = 0;
 }
 
-class Client{
-    socket:net.Socket;
+class LaunchpadClient{
     position:Position = {x:0, y:0};
     active:boolean = false;
-}
+    socket:any;
 
-enum ClientType{
-    LAUNCHPAD,
-    IMG,
-    NONE
+    SendImage(image:Jimp){
+        for(let y = 0; y < 8; y+=1)
+        {
+            for(let x = 0; x < 8; x+=1)
+            {
+                let color = Jimp.intToRGBA(image.getPixelColor(x, y));
+                this.socket.emit('launchpad:set', {
+                    x : x,
+                    y : y,
+                    r : color.r,
+                    g : color.g,
+                    b : color.b
+                });
+            }
+        }
+    }
 }
 
 export class LaunchpadServer{
-    img:Jimp;
-    imgSender:net.Socket = null;
-    server:net.Server = null;
-    launchpadClients:Array<Client> = []
+    launchpadClients:Array<LaunchpadClient> = []
     min_x = 0;
     min_y = 0;
     max_x = 0;
@@ -33,23 +43,23 @@ export class LaunchpadServer{
     height = 0;
     ratio = 1;
 
-    CheckPosition(p:Position):boolean
+    FindClientAt(p:Position):LaunchpadClient
     {
-        return (this.launchpadClients.find((client) => {
-            return client.position == p;
-        }) || null) != null;
+        return this.launchpadClients.find((client) => {
+            return p.x == client.position.x && p.y == client.position.y;
+        });
     }
 
     FindEmptySlot():Position|null{
         for(let y = this.min_y; y < this.max_y; y+=1){
             for(let x = this.min_x; x < this.max_x; x+=1){
-                if(this.CheckPosition({y:y, x:x}))
+                if(this.FindClientAt({y:y, x:x}) != null)
                     return({y:y, x:x});
             }
         }
         return null;
     }
-    AddClient(client:Client){
+    AddClient(client:LaunchpadClient){
         if(this.launchpadClients.length == 0){
             client.active = true;
         }else{
@@ -66,26 +76,33 @@ export class LaunchpadServer{
     }
 
     UpdateImage(){
-        console.log('updating image');
+        console.log('Launchpad server : nb clients : ', this.launchpadClients.length);
+        console.log('Launchpad Server : updating image');
+        console.log(`Launchpad Server : height ${this.height} width ${this.width}`);
         
-        if(fs.existsSync('image')){
-            Jimp.read('image').then((img) => {
-                console.log('success');
+        if(fs.existsSync('image.png')){
+            Jimp.read('image.png').then((img) => {
+                console.log('Launchpad Server : read image success');
                 img.resize(this.width * 8, this.height * 8, Jimp.RESIZE_NEAREST_NEIGHBOR);
                 for(let y = 0; y < this.height; ++y){
                     for(let x = 0; x < this.width; ++x){
-                        let partImg = img.crop(x, y, 8, 8);
-                        partImg.write(`debug-${y}-${x}`);
+                        let imgClone = img.clone();
+                        imgClone.crop(x, y, 8, 8);
+                        let client = this.FindClientAt({x:x, y:y});
+                        console.log(x, y);
+                        console.log('sending to client ' + client);
+                        client.SendImage(new Jimp(imgClone));
+                        imgClone.write(`debug-${y}-${x}`);
                     }
                 }
             }).catch((err) => {
-
+                console.log('Launchpad Server : error ' + err);
             })
         }
     }
     
     UpdateLayout(){
-        console.log('reseting layout');
+        console.log('Launchpad Server : reseting layout');
         let prevWidth = this.width;
         let prevHeight = this.height;
         if(this.launchpadClients.length == 0){
@@ -124,83 +141,26 @@ export class LaunchpadServer{
         this.width = (this.max_x - this.min_x) + 1;
         this.height = (this.max_y - this.min_y) + 1;
         this.ratio = (this.width / this.height);
-        if((this.launchpadClients.length > 0) &&
-            (prevHeight != this.height || prevWidth != this.width)){
+        /*
+        if((this.launchpadClients.length > 0) && 
+            (force ||
+            (prevHeight != this.height || prevWidth != this.width)))
+        {
             this.UpdateImage();
         }
-
+        */
+        if(this.launchpadClients.length > 0)
+        {
+            this.UpdateImage();
+        }
     }
 
-    RemoveClient(client:Client){
+    RemoveClient(client:LaunchpadClient){
         let index = this.launchpadClients.indexOf(client, 0);
         if (index > -1) {
             this.launchpadClients.splice(index, 1);
         }
         this.UpdateLayout();
-    }
-    
-
-    SetupServer(port:number){
-        this.server = net.createServer((socket) => {
-            let clientType = ClientType.NONE;
-            let buffer:Buffer = Buffer.alloc(0, '');
-            console.log('client connected : ' + socket.remoteAddress + ':' + socket.remotePort);
-    
-            socket.on('data', (data) => {
-
-                if(data.toString() == 'launchpad client'){
-                    if(clientType == ClientType.NONE)
-                    {
-                        clientType = ClientType.LAUNCHPAD;
-                        let client = new Client()
-                        client.socket = socket;
-                        this.AddClient(client);
-                        socket.on('end', () => {
-                            this.RemoveClient(client);
-                            console.log('launchpad client disconected : ' + socket.remoteAddress);
-                        });
-                    }
-                    else{
-                        console.log('client already set');
-                    }
-                }
-                else if(data.toString() == 'img client'){
-                    if(clientType == ClientType.NONE){
-                        if(!this.imgSender){
-                            clientType = ClientType.IMG;
-                            this.imgSender = socket;
-                        }
-                        socket.on('end', () => {
-                            console.log('img client disconected : ' + socket.remoteAddress);
-                            this.imgSender = null;
-                        });
-                        console.log('sending ok');
-                        socket.write('ok');
-                    }
-                }
-                if(clientType == ClientType.IMG){
-                    if(data.toString() == 'sending image'){
-                        let filestream = fs.createWriteStream('image');
-                        socket.pipe(filestream);
-                        filestream.on('close', () => {
-                            console.log('FILESTREAM CLOSE');
-                        });
-                    }
-                    
-                    if(data.toString() == 'finished'){
-                        console.log('RECEIVED finished');
-                        // console.log('end file');
-                        // fs.writeFileSync("out.png", buffer);
-                        // buffer = new Buffer('');
-                    }
-                    
-                    //console.log('\nreceived from img client : ', data.toString().substr(0, 10), data.length);
-                }
-            });
-        });
-        this.server.listen(port, () => {
-            console.log('server open on port ' + port);
-        });
     }
 
     SetupCLI(){
@@ -221,7 +181,7 @@ export class LaunchpadServer{
                 //console.log(this.clients);
                 for(let [index, client] of this.launchpadClients.entries())
                 {
-                    console.log('client : ' + index + ' - ' + client.socket.remoteAddress + ':' + client.socket.remotePort + ' ' + JSON.stringify(client.position) + ' active : ' + client.active);
+                    console.log('client : ' + index + JSON.stringify(client.position) + ' active : ' + client.active);
                 }
             }
             else if(words[0] == 'mv') //move client position
@@ -242,14 +202,33 @@ export class LaunchpadServer{
             }
         });
     }
-    
-    constructor(port:number)
-    {
-        this.SetupCLI();
-        this.SetupServer(port);
-        fs.watchFile('image', () => {
-            console.log('file changed');
+
+    constructor(port:number){
+        
+        let server = http.createServer();
+        let io = SocketIO(server);
+        io.on('connection', (socket) => {
+            console.log('Launchpad Server : client connected');
+            let launchpadClient = new LaunchpadClient();
+            launchpadClient.socket = socket;
+            this.AddClient(launchpadClient);
+
+            socket.on('disconnect', () => {
+                console.log('Launchpad Server : disc');
+                this.RemoveClient(launchpadClient);
+            });
+        });
+
+        server.listen(port, () => {
+            this.SetupCLI();
+            console.log('Launchpad Server : Server open on port ' + port);
+        });
+
+        // Actualisation des launchpads quand l'image change
+        fs.watchFile('image.png', () => {
+            console.log('Launchpad Server : file changed');
             this.UpdateImage();
         });
     }
 }
+
